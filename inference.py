@@ -3,107 +3,158 @@ import numpy as np
 import networkx as nx
 import joblib
 import plotly.graph_objects as go
+from functools import lru_cache
 
-# -----------------------------
-# Paths inside the Space
-# -----------------------------
-FEATURES_PATH = r"C:\Users\vansh\Desktop\DSSA\Sem3_assign\Banking\m\data\elliptic_txs_features.csv"
-CLASSES_PATH  = r"C:\Users\vansh\Desktop\DSSA\Sem3_assign\Banking\m\data\elliptic_txs_classes.csv"
-EDGES_PATH    = r"C:\Users\vansh\Desktop\DSSA\Sem3_assign\Banking\m\data\elliptic_txs_edgelist.csv"
-MODEL_PATH    = r"C:\Users\vansh\Desktop\DSSA\Sem3_assign\Banking\m\Models\lightgbm_final_model.pkl"
+# =============================
+# Google Drive file IDs
+# =============================
 
-# -----------------------------
+FEATURES_ID = "1Vyz05FjbzK6AzJoEPQjYyZq0n-dDIZqJ"   # elliptic_txs_features.csv
+CLASSES_ID  = "1v0wJWmOpdggj1HXVtytyoOjvOtZIQF5u"    # elliptic_txs_classes.csv
+EDGES_ID    = "1kxfTDSXmHh9EbJtCamNugaJ-pp4fx5Mj"   # elliptic_txs_edgelist.csv
+
+# Model is stored inside the repo
+MODEL_PATH  = "Models/lightgbm_final_model.pkl"
+
 # Class label mapping
-# -----------------------------
 CLASS_LABELS = {
     1: "Illicit",
     2: "Licit",
     0: "Unknown",
-    None: "Unknown"
+    None: "Unknown",
 }
 
-# -----------------------------
+
+def drive_url(file_id: str) -> str:
+    """Build direct-download URL from a Google Drive file_id."""
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+
+# =============================
 # 1. Load & prepare data
-# -----------------------------
-features_raw = pd.read_csv(FEATURES_PATH, header=None)
+# =============================
 
-num_cols  = features_raw.shape[1]
-num_feats = num_cols - 2  # txId + time_step
+@lru_cache(maxsize=1)
+def load_raw_data():
+    """Load features, classes, edges from Google Drive and prepare them."""
+    # FEATURES: no header, same structure as before
+    features_raw = pd.read_csv(drive_url(FEATURES_ID), header=None)
 
-feat_cols = [f"f_{i}" for i in range(1, num_feats + 1)]
-rename_map = {0: "txId", 1: "time_step"}
-rename_map.update({i + 2: feat_cols[i] for i in range(num_feats)})
+    num_cols = features_raw.shape[1]
+    num_feats = num_cols - 2  # txId + time_step
 
-features_df = features_raw.rename(columns=rename_map)
+    feat_cols = [f"f_{i}" for i in range(1, num_feats + 1)]
+    rename_map = {0: "txId", 1: "time_step"}
+    rename_map.update({i + 2: feat_cols[i] for i in range(num_feats)})
 
-# Classes file: HAS header
-classes_df = pd.read_csv(CLASSES_PATH)
-classes_df = classes_df.rename(columns={
-    classes_df.columns[0]: "txId",
-    classes_df.columns[1]: "class"
-})
+    features_df = features_raw.rename(columns=rename_map)
 
-# Edges file: HAS header (txId1, txId2)
-edges_df = pd.read_csv(EDGES_PATH)
-edges_df = edges_df.rename(columns={
-    edges_df.columns[0]: "src",
-    edges_df.columns[1]: "dst"
-})
+    # CLASSES: has header
+    classes_df = pd.read_csv(drive_url(CLASSES_ID))
+    classes_df = classes_df.rename(
+        columns={
+            classes_df.columns[0]: "txId",
+            classes_df.columns[1]: "class",
+        }
+    )
 
-# Ensure consistent types
-features_df["txId"] = features_df["txId"].astype(int)
-classes_df["txId"]  = classes_df["txId"].astype(int)
-edges_df["src"]     = edges_df["src"].astype(int)
-edges_df["dst"]     = edges_df["dst"].astype(int)
+    # EDGES: has header (txId1, txId2)
+    edges_df = pd.read_csv(drive_url(EDGES_ID))
+    edges_df = edges_df.rename(
+        columns={
+            edges_df.columns[0]: "src",
+            edges_df.columns[1]: "dst",
+        }
+    )
 
-# Merge features + classes
-data_df = features_df.merge(classes_df, on="txId", how="left")
+    # Ensure consistent types
+    features_df["txId"] = features_df["txId"].astype(int)
+    classes_df["txId"] = classes_df["txId"].astype(int)
+    edges_df["src"] = edges_df["src"].astype(int)
+    edges_df["dst"] = edges_df["dst"].astype(int)
 
-# -----------------------------
-# 2. Load model & compute risk
-# -----------------------------
-model = joblib.load(MODEL_PATH)
+    # Merge features + classes
+    data_df = features_df.merge(classes_df, on="txId", how="left")
 
-X_full = data_df[feat_cols].values.astype("float32")
-all_proba = model.predict_proba(X_full)[:, 1]
-data_df["proba_illicit"] = all_proba
+    return data_df, edges_df, feat_cols
 
-# Risk bucket function
-def risk_bucket(p: float) -> str:
-    if p >= 0.90:
-        return "High"
-    elif p >= 0.75:
-        return "Medium"
-    elif p >= 0.50:
-        return "Low"
-    else:
-        return "Safe"
 
-data_df["risk_bucket"] = data_df["proba_illicit"].apply(risk_bucket)
+@lru_cache(maxsize=1)
+def load_everything():
+    """
+    Load data, model, compute probabilities, risk buckets,
+    graph, and all lookup dicts.
+    """
+    data_df, edges_df, feat_cols = load_raw_data()
 
-# -----------------------------
-# 3. Build graph & degree
-# -----------------------------
-G_full = nx.Graph()
-G_full.add_edges_from(edges_df[["src", "dst"]].itertuples(index=False, name=None))
+    # Load model from repo
+    model = joblib.load(MODEL_PATH)
 
-degree_dict = dict(G_full.degree())
-data_df["degree"] = data_df["txId"].map(degree_dict).fillna(0).astype(int)
+    # Predict probabilities for all transactions
+    X_full = data_df[feat_cols].values.astype("float32")
+    all_proba = model.predict_proba(X_full)[:, 1]
+    data_df["proba_illicit"] = all_proba
 
-# Mappings for fast lookup
-proba_map = data_df.set_index("txId")["proba_illicit"].to_dict()
-bucket_map = data_df.set_index("txId")["risk_bucket"].to_dict()
+    # Risk bucket
+    def risk_bucket(p: float) -> str:
+        if p >= 0.90:
+            return "High"
+        elif p >= 0.75:
+            return "Medium"
+        elif p >= 0.50:
+            return "Low"
+        else:
+            return "Safe"
 
-# UPDATED — convert numeric class to text label
-class_raw = data_df.set_index("txId")["class"].to_dict()
-class_map = {tx: CLASS_LABELS.get(v, "Unknown") for tx, v in class_raw.items()}
+    data_df["risk_bucket"] = data_df["proba_illicit"].apply(risk_bucket)
 
-degree_map = data_df.set_index("txId")["degree"].to_dict()
+    # Build graph
+    G_full = nx.Graph()
+    G_full.add_edges_from(
+        edges_df[["src", "dst"]].itertuples(index=False, name=None)
+    )
 
-# -----------------------------
-# 4. Helper: predict a single tx
-# -----------------------------
+    # Degree
+    degree_dict = dict(G_full.degree())
+    data_df["degree"] = (
+        data_df["txId"].map(degree_dict).fillna(0).astype(int)
+    )
+
+    # Lookup maps
+    proba_map = data_df.set_index("txId")["proba_illicit"].to_dict()
+    bucket_map = data_df.set_index("txId")["risk_bucket"].to_dict()
+
+    class_raw = data_df.set_index("txId")["class"].to_dict()
+    class_map = {
+        tx: CLASS_LABELS.get(v, "Unknown") for tx, v in class_raw.items()
+    }
+
+    degree_map = data_df.set_index("txId")["degree"].to_dict()
+
+    return (
+        data_df,
+        G_full,
+        proba_map,
+        bucket_map,
+        class_map,
+        degree_map,
+    )
+
+
+# =============================
+# 2. Public functions used by app.py
+# =============================
+
 def predict_tx(txid: int) -> dict:
+    (
+        data_df,
+        G_full,
+        proba_map,
+        bucket_map,
+        class_map,
+        degree_map,
+    ) = load_everything()
+
     txid = int(txid)
 
     if txid not in proba_map:
@@ -112,8 +163,6 @@ def predict_tx(txid: int) -> dict:
     p = float(proba_map[txid])
     bucket = bucket_map.get(txid, "Safe")
     degree = int(degree_map.get(txid, 0))
-
-    # UPDATED — use textual class label
     cls = class_map.get(txid, "Unknown")
 
     return {
@@ -121,13 +170,20 @@ def predict_tx(txid: int) -> dict:
         "proba_illicit": p,
         "risk_bucket": bucket,
         "degree": degree,
-        "class": cls,  # <-- NOW RETURNS LABEL
+        "class": cls,
     }
 
-# -----------------------------
-# 5. Neighbor risk distribution
-# -----------------------------
+
 def neighbor_risk_distribution(txid: int):
+    (
+        data_df,
+        G_full,
+        proba_map,
+        bucket_map,
+        class_map,
+        degree_map,
+    ) = load_everything()
+
     txid = int(txid)
     if txid not in G_full:
         raise ValueError(f"txId {txid} not found in graph")
@@ -140,16 +196,22 @@ def neighbor_risk_distribution(txid: int):
     counts = nb_df["risk_bucket"].value_counts().to_dict()
     return counts
 
-# -----------------------------
-# 6. Overall risk distribution
-# -----------------------------
+
 def overall_risk_distribution():
+    (data_df, *_rest) = load_everything()
     return data_df["risk_bucket"].value_counts().to_dict()
 
-# -----------------------------
-# 7. 3D ego graph with Plotly
-# -----------------------------
+
 def plot_3d_tx_ego(txid: int, hops: int = 2, max_nodes: int = 400):
+    (
+        data_df,
+        G_full,
+        proba_map,
+        bucket_map,
+        class_map,
+        degree_map,
+    ) = load_everything()
+
     txid = int(txid)
 
     if txid not in G_full:
@@ -161,7 +223,7 @@ def plot_3d_tx_ego(txid: int, hops: int = 2, max_nodes: int = 400):
         nodes = list(ego.nodes())
         nodes.remove(txid)
         nodes_sorted = sorted(nodes, key=lambda n: ego.degree[n], reverse=True)
-        keep = [txid] + nodes_sorted[:max_nodes - 1]
+        keep = [txid] + nodes_sorted[: max_nodes - 1]
         ego = ego.subgraph(keep).copy()
 
     pos = nx.spring_layout(ego, dim=3, seed=42)
