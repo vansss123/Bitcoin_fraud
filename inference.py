@@ -33,19 +33,29 @@ def drive_url(file_id: str) -> str:
 # =============================
 # 1. Load & prepare data
 # =============================
-
 @lru_cache(maxsize=1)
 def load_raw_data():
     """Load features, classes, edges from Google Drive and prepare them."""
-    # FEATURES: no header, same structure as before
-    features_raw = pd.read_csv(drive_url(FEATURES_ID), header=None)
 
-    num_cols = features_raw.shape[1]
-    num_feats = num_cols - 2  # txId + time_step
+    # FEATURES: this CSV now HAS a header row (txId, time_step, f_1, f_2, ...)
+    features_raw = pd.read_csv(drive_url(FEATURES_ID), low_memory=False)
 
-    feat_cols = [f"f_{i}" for i in range(1, num_feats + 1)]
-    rename_map = {0: "txId", 1: "time_step"}
-    rename_map.update({i + 2: feat_cols[i] for i in range(num_feats)})
+    # First two columns are txId and time_step, rest are features
+    cols = list(features_raw.columns)
+
+    if len(cols) < 3:
+        raise ValueError("Features file does not have the expected columns.")
+
+    rename_map = {
+        cols[0]: "txId",
+        cols[1]: "time_step",
+    }
+
+    feat_cols = []
+    for i, c in enumerate(cols[2:], start=1):
+        new_name = f"f_{i}"
+        rename_map[c] = new_name
+        feat_cols.append(new_name)
 
     features_df = features_raw.rename(columns=rename_map)
 
@@ -306,3 +316,4 @@ def plot_3d_tx_ego(txid: int, hops: int = 2, max_nodes: int = 400):
         margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
+
