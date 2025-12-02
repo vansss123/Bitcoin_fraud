@@ -37,25 +37,23 @@ def drive_url(file_id: str) -> str:
 def load_raw_data():
     """Load features, classes, edges from Google Drive and prepare them."""
 
-    # FEATURES: this CSV now HAS a header row (txId, time_step, f_1, f_2, ...)
-    features_raw = pd.read_csv(drive_url(FEATURES_ID), low_memory=False)
+    # FEATURES: originally used header=None on your machine
+    # Do the same here, but drop a possible header row ("txId", ...)
+    features_raw = pd.read_csv(drive_url(FEATURES_ID), header=None, low_memory=False)
 
-    # First two columns are txId and time_step, rest are features
-    cols = list(features_raw.columns)
+    # If first cell looks like a header (string "txId"), drop that row
+    first_val = features_raw.iloc[0, 0]
+    if isinstance(first_val, str) and first_val.lower() in ("txid", "tx_id"):
+        features_raw = features_raw.iloc[1:].reset_index(drop=True)
 
-    if len(cols) < 3:
-        raise ValueError("Features file does not have the expected columns.")
+    # Now the structure should match what the model was trained on:
+    # col 0 = txId, col 1 = time_step, rest = features
+    num_cols = features_raw.shape[1]
+    num_feats = num_cols - 2  # txId + time_step
 
-    rename_map = {
-        cols[0]: "txId",
-        cols[1]: "time_step",
-    }
-
-    feat_cols = []
-    for i, c in enumerate(cols[2:], start=1):
-        new_name = f"f_{i}"
-        rename_map[c] = new_name
-        feat_cols.append(new_name)
+    feat_cols = [f"f_{i}" for i in range(1, num_feats + 1)]
+    rename_map = {0: "txId", 1: "time_step"}
+    rename_map.update({i + 2: feat_cols[i] for i in range(num_feats)})
 
     features_df = features_raw.rename(columns=rename_map)
 
@@ -336,6 +334,7 @@ def plot_3d_tx_ego(txid: int, hops: int = 2, max_nodes: int = 400):
         margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
+
 
 
 
