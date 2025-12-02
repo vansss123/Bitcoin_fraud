@@ -10,11 +10,11 @@ from functools import lru_cache
 # =============================
 
 FEATURES_ID = "1Vyz05FjbzK6AzJoEPQjYyZq0n-dDIZqJ"   # elliptic_txs_features.csv
-CLASSES_ID  = "1v0wJWmOpdggj1HXVtytyoOjvOtZIQF5u"    # elliptic_txs_classes.csv
+CLASSES_ID  = "1v0wJWmOpdggj1HXVtytyoOjvOtZIQF5u"   # elliptic_txs_classes.csv
 EDGES_ID    = "1kxfTDSXmHh9EbJtCamNugaJ-pp4fx5Mj"   # elliptic_txs_edgelist.csv
 
-# Model is stored inside the repo
-MODEL_PATH  = "Models/lightgbm_final_model.pkl"
+# Model is stored inside the repo (Models folder in GitHub)
+MODEL_PATH = "Models/lightgbm_final_model.pkl"
 
 # Class label mapping
 CLASS_LABELS = {
