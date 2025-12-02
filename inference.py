@@ -105,16 +105,19 @@ def load_everything():
     # Keep only feature columns and force numeric
     feats_df = data_df[feat_cols].apply(pd.to_numeric, errors="coerce")
 
-    # If the model knows how many features it expects, check that
-    n_model = getattr(model, "n_features_in_", None)
     n_data = feats_df.shape[1]
+    n_model = getattr(model, "n_features_in_", None)
 
-    if n_model is not None and n_data != n_model:
-        # This will show in the Streamlit logs if there is a real mismatch
-        raise ValueError(
-            f"Feature mismatch: data has {n_data} features, "
-            f"but model expects {n_model}."
-        )
+    # Align number of features with what the model expects
+    if n_model is not None:
+        if n_data > n_model:
+            # Too many features in the CSV -> keep only the first n_model
+            feats_df = feats_df.iloc[:, :n_model]
+        elif n_data < n_model:
+            # Not enough features -> this is a real problem
+            raise ValueError(
+                f"Model expects {n_model} features but data only has {n_data}."
+            )
 
     # Replace NaNs with 0 and convert to float32
     X_full = feats_df.fillna(0).astype("float32").values
@@ -333,5 +336,6 @@ def plot_3d_tx_ego(txid: int, hops: int = 2, max_nodes: int = 400):
         margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
+
 
 
